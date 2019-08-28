@@ -72,7 +72,6 @@ class Model_w_GradCAM():
     def set_class_index(self, category_index):
         # 设置固定类别
         if not category_index:
-
             self.category_index = None
         else:
             assert isinstance(category_index, int)
@@ -83,27 +82,42 @@ class Model_w_GradCAM():
             self.one_hot = torch.from_numpy(one_hot)
             self.one_hot.requires_grad_(True)
 
-    def draw_cam(self, img, pred):
-        # img: RGB
-        # pred: shape=1,c
+    def draw_cam(self, imgs, preds,category_index=None)->list:
+        # imgs: RGB
+        # preds: shape=1,c
+        # batch预测需要指定类别
         # 求梯度
-        self.model.zero_grad()
-        if not self.category_index:
-            # 没有类别，就按最大值来
-            pred_max = torch.max(pred, 1)
-            pred = torch.zeros_like(pred)
-            pred[torch.arange(pred.shape[0]), pred_max.indices] = pred_max.values
+        if not isinstance(imgs,(list,)) or isinstance(imgs,(np.ndarray,)):
+            imgs=[imgs]
+        elif isinstance(imgs,(list,)):
+            pass
         else:
-            pred = pred * self.one_hot
+            raise TypeError
+        self.model.zero_grad()
+        if category_index:
+            self.set_class_index(category_index)# 后指定/重设置
+        assert len(imgs)==preds.shape[0]
+        if not self.category_index:
+            # 没有类别，就按最大值来，只能逐个算
+            assert preds.shape[0] == 1
+            pred_max = torch.max(preds, 1)
+            preds = torch.zeros_like(preds)
+            preds[torch.arange(preds.shape[0]), pred_max.indices] = pred_max.values
+        else:
+            preds = preds * self.one_hot
         # 必须独立求梯度,只能传一张
-        class_loss = torch.sum(pred)
+        class_loss = torch.sum(preds)
         class_loss.backward(retain_graph=True)
         # 可视化图
-        self.grad_map = torch.mean(self.grad_map, [2, 3], keepdim=True)  # 1,c,1,1
-        cam = self.grad_map[0] * self.feature_map[0]  # c,mH,mW
-        cam = torch.sum(cam, 0).numpy()  # mH,mW
-        heatmap = self.heatmap(img, cam)
-        return heatmap
+        self.grad_map = torch.mean(self.grad_map, [2, 3], keepdim=True)  # mb,c,1,1
+        cam = self.grad_map * self.feature_map  # mb,c,mH,mW
+        cam = torch.sum(cam, 1).numpy()  # mb,mH,mW
+
+        heatmaps=[]
+        for i in range(len(cam)):
+            hm=self.heatmap(imgs[i], cam[i])
+            heatmaps.append(hm)
+        return heatmaps
 
     def heatmap(self, img, cam):
         img = np.float32(img) / 255
@@ -119,36 +133,29 @@ class Model_w_GradCAM():
         return heatmap
 
     def __call__(self, *args, **kwargs):
-        assert args[0].shape[0] == 1
-        pred = self.model(*args, **kwargs)  # softmax之前
-        return pred
-        pass
+        preds = self.model(*args, **kwargs)  # softmax之前
+        return preds
 
 
-def img_preprocess(img_in):
+def img_preprocess(imgs):
     """
     读取图片，转为模型输入
     :param img_in: ndarray, [1,H, W, C]
     :return: PIL.image
     """
-    img = img_in.copy()
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize([0.4948052, 0.48568845, 0.44682974], [0.24580306, 0.24236229, 0.2603115])
     ])
-    img = Image.fromarray(np.uint8(img))
-    img = transform(img)
-    img = img.unsqueeze(0)
-    return img
-
-
-def save_img_cam(img, cam, out_dir):
-    path_cam_img = os.path.join(out_dir, "cam.jpg")
-    path_raw_img = os.path.join(out_dir, "raw.jpg")
-    if not os.path.exists(out_dir):
-        os.makedirs(out_dir)
-    cv2.imwrite(path_cam_img, np.uint8(255 * cam))
-    cv2.imwrite(path_raw_img, np.uint8(255 * img))
+    ret_imgs=[]
+    if not isinstance(imgs,(list,)):
+        imgs = [imgs]
+    for img in imgs:
+        img = img.copy()
+        img = transform(img)
+        ret_imgs.append(img)
+    ret_imgs=torch.stack(ret_imgs,0)
+    return ret_imgs
 
 
 if __name__ == '__main__':
@@ -170,7 +177,9 @@ if __name__ == '__main__':
     net = Model_w_GradCAM(net)
     output = net(img_input)
     print(classes[torch.argmax(output.cpu(),1)])
-    cam = net.draw_cam(img, output)
+    cam = net.draw_cam([img], output)[0]
     from matplotlib import pyplot as plt
-    plt.imshow(cam);plt.show();plt.imsave(os.path.join(output_dir,'cam.png'),cam)
-    plt.imshow(img);plt.show();plt.imsave(os.path.join(output_dir,'img.png'),img)
+    plt.imshow(cam);plt.show();
+    # plt.imsave(os.path.join(output_dir,'cam.png'),cam)
+    plt.imshow(img);plt.show();
+    # plt.imsave(os.path.join(output_dir,'img.png'),img)
