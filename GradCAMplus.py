@@ -6,7 +6,7 @@ import torch.nn as nn
 from model import Net,img_preprocess
 
 
-class Model_w_GradCAM():
+class Model_w_GradCAMplus():
     def __init__(self, model: torch.nn.Module, category_index: int = None, aimed_module: str = None):
         # 给了model，就知道了默认要取的layer，输出类别数。
         self.model = model
@@ -77,12 +77,20 @@ class Model_w_GradCAM():
         else:
             preds = preds[:, self.category_index]
         # 必须独立求梯度,只能传一张
-        class_loss = torch.sum(preds)
-        class_loss.backward(retain_graph=True)
+        Sc = torch.sum(preds)
+        exp_Sc = torch.exp(Sc)  # Yc=exp(Sc)
+
+        Sc.backward(retain_graph=True)
         # 可视化图
-        self.grad_map = torch.mean(self.grad_map, [2, 3], keepdim=True)  # mb,c,1,1
-        cam = self.grad_map * self.feature_map  # mb,c,mH,mW
-        cam = torch.sum(cam, 1).numpy()  # mb,mH,mW
+        Yc_A = exp_Sc * self.grad_map
+        alpha_c = torch.pow(Yc_A, 2) / (
+                1e-10 + 2 * torch.pow(Yc_A, 2) + torch.sum(self.feature_map, [2, 3], keepdim=True) * torch.pow(Yc_A,
+                                                                                                               3))  # mb,c,1,1
+        # self.grad_map = torch.mean(self.grad_map, [2, 3], keepdim=True)  # mb,c,1,1
+
+        w_c = torch.sum(alpha_c * Yc_A.relu_(), [2, 3], keepdim=True)
+        cam = w_c * self.feature_map  # mb,c,mH,mW
+        cam = torch.sum(cam, 1).detach().numpy()  # mb,mH,mW
 
         heatmaps = []
         for i in range(len(cam)):
@@ -109,8 +117,6 @@ class Model_w_GradCAM():
 
 
 
-
-
 if __name__ == '__main__':
     print('for example!')
 
@@ -129,14 +135,14 @@ if __name__ == '__main__':
     img_input = img_preprocess(img)
     net = Net()
     net.load_state_dict(torch.load(path_net))
-    net = Model_w_GradCAM(net)
+    net = Model_w_GradCAMplus(net)
     output = net(img_input)
     print(classes[torch.argmax(output.cpu(), 1)])
     cam = net.draw_cam([img], output)[0]
     from matplotlib import pyplot as plt
 
     plt.imshow(cam), plt.show()
-    plt.imsave(os.path.join(output_dir, 'gradcam4ship.png'), cam)
+    plt.imsave(os.path.join(output_dir, 'gradcamPP4ship.png'), cam)
     plt.imshow(img), plt.show()
     # plt.imsave(os.path.join(output_dir,'img.png'),img)
 
@@ -147,3 +153,4 @@ if __name__ == '__main__':
     cam = net.draw_cam(imgs, output, 1)
     print(classes[1], 'number', len(cam))
     # plt.imshow(cam[0]), plt.show()
+    plt.imsave(os.path.join(output_dir, 'gradcamPP4car.png'), cam[0])
