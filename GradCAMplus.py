@@ -72,11 +72,11 @@ class Model_w_GradCAMplus():
         assert len(imgs) == preds.shape[0]
         if not self.category_index:
             # 没有类别，就按最大值来，只能逐个算
-            assert preds.shape[0] == 1
-            preds = preds[:, torch.max(preds, 1).indices]
+            preds = preds[:, torch.argmax(preds, 1)]
         else:
             preds = preds[:, self.category_index]
         # 必须独立求梯度,只能传一张
+
         Sc = torch.sum(preds)
         exp_Sc = torch.exp(Sc)  # Yc=exp(Sc)
 
@@ -86,16 +86,13 @@ class Model_w_GradCAMplus():
         alpha_c = torch.pow(Yc_A, 2) / (
                 1e-10 + 2 * torch.pow(Yc_A, 2) + torch.sum(self.feature_map, [2, 3], keepdim=True) * torch.pow(Yc_A,
                                                                                                                3))  # mb,c,1,1
-        # self.grad_map = torch.mean(self.grad_map, [2, 3], keepdim=True)  # mb,c,1,1
 
         w_c = torch.sum(alpha_c * Yc_A.relu_(), [2, 3], keepdim=True)
         cam = w_c * self.feature_map  # mb,c,mH,mW
         cam = torch.sum(cam, 1).detach().numpy()  # mb,mH,mW
 
-        heatmaps = []
-        for i in range(len(cam)):
-            hm = self.heatmap(imgs[i], cam[i])
-            heatmaps.append(hm)
+        heatmaps=list(map(self.heatmap,imgs,cam))
+
         return heatmaps
 
     def heatmap(self, img, cam):
@@ -135,9 +132,9 @@ if __name__ == '__main__':
     img_input = img_preprocess(img)
     net = Net()
     net.load_state_dict(torch.load(path_net))
-    net = Model_w_GradCAMplus(net)
+    net = Model_w_GradCAMplus(net,aimed_module='conv1')
     output = net(img_input)
-    print(classes[torch.argmax(output.cpu(), 1)])
+    print(classes[torch.argmax(output.cpu())])
     cam = net.draw_cam([img], output)[0]
     from matplotlib import pyplot as plt
 
@@ -150,7 +147,7 @@ if __name__ == '__main__':
     imgs = [img, img]
     img_input = img_preprocess(imgs)
     output = net(img_input)
-    cam = net.draw_cam(imgs, output, 1)
+    cam = net.draw_cam(imgs, output)
     print(classes[1], 'number', len(cam))
     # plt.imshow(cam[0]), plt.show()
     plt.imsave(os.path.join(output_dir, 'gradcamPP4car.png'), cam[0])

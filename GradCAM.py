@@ -71,9 +71,8 @@ class Model_w_GradCAM():
             self.set_class_index(category_index)  # 后指定/重设置
         assert len(imgs) == preds.shape[0]
         if not self.category_index:
-            # 没有类别，就按最大值来，只能逐个算
-            assert preds.shape[0] == 1
-            preds = preds[:, torch.max(preds, 1).indices]
+            # 没有类别，就按最大值来
+            preds = preds[:, torch.argmax(preds, 1)]
         else:
             preds = preds[:, self.category_index]
         # 必须独立求梯度,只能传一张
