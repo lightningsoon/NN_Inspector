@@ -3,21 +3,26 @@ import os
 import numpy as np
 import torch
 import torch.nn as nn
-from model import Net,img_preprocess
 
 
 class Model_w_GradCAMplus():
     def __init__(self, model: torch.nn.Module, category_index: int = None, aimed_module: str = None):
         # 给了model，就知道了默认要取的layer，输出类别数。
         self.model = model
-        self.model_items = list(self.model._modules.items())
+        self.model_items = []
+        self.get_model_reversed_layers(model)
         self.model_items.reverse()
         self.get_classes()
         self.chose_module(aimed_module)
         self.set_class_index(category_index)
         self.set_hook()
         pass
-
+    def get_model_reversed_layers(self,perspective_model):
+        for name, module in perspective_model._modules.items():
+            if len(module._modules) > 0:
+                self.get_model_reversed_layers(module)
+            else:
+                self.model_items.append([name,module])
     def set_hook(self):
         def forward_hook(module, input, output):
             self.feature_map = output.detach().cpu()  # bs,channels,size,size
@@ -115,6 +120,8 @@ class Model_w_GradCAMplus():
 
 
 if __name__ == '__main__':
+    from model import Net, img_preprocess
+
     print('for example!')
 
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -139,7 +146,7 @@ if __name__ == '__main__':
     from matplotlib import pyplot as plt
 
     plt.imshow(cam), plt.show()
-    plt.imsave(os.path.join(output_dir, 'gradcamPP4ship.png'), cam)
+    # plt.imsave(os.path.join(output_dir, 'gradcamPP4ship.png'), cam)
     plt.imshow(img), plt.show()
     # plt.imsave(os.path.join(output_dir,'img.png'),img)
 
@@ -150,4 +157,4 @@ if __name__ == '__main__':
     cam = net.draw_cam(imgs, output)
     print(classes[1], 'number', len(cam))
     # plt.imshow(cam[0]), plt.show()
-    plt.imsave(os.path.join(output_dir, 'gradcamPP4car.png'), cam[0])
+    # plt.imsave(os.path.join(output_dir, 'gradcamPP4car.png'), cam[0])
